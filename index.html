@@ -1,277 +1,271 @@
 <!DOCTYPE html>
-<html>
+<html lang="ru">
 <head>
 <meta charset="utf-8" />
-<title>GPS трекер</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+<title>GPS Track Recorder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet/dist/leaflet.css"
+/>
+
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <style>
-html, body { margin:0; padding:0; height:100%; }
-#map { height:100vh; width:100vw; }
+html, body, #map {
+  height: 100%;
+  margin: 0;
+}
 
-/* Панель кнопок */
-#controls {
-  position:absolute;
-  top:10px;
-  left:50%;
-  transform:translateX(-50%);
-  z-index:1000;
-  background:#fff;
-  padding:8px;
-  border-radius:12px;
-  display:flex;
-  gap:6px;
-  box-shadow:0 2px 8px rgba(0,0,0,.25);
+.controls {
+  position: fixed;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
 }
 
 button {
-  padding:8px 12px;
-  border-radius:8px;
-  border:1px solid #ccc;
-  background:#f5f5f5;
-  font-size:14px;
+  padding: 10px 12px;
+  font-size: 14px;
+  border-radius: 8px;
+  border: none;
+  background: #eee;
 }
+
 button.active {
-  background:#0077ff;
-  color:#fff;
-  border-color:#0077ff;
+  background: #2196f3;
+  color: white;
 }
 
-/* Кнопка центрирования */
-#centerBtn {
-  position:absolute;
-  right:15px;
-  top:50%;
-  transform:translateY(-50%);
-  z-index:1000;
-  width:48px;
-  height:48px;
-  border-radius:50%;
-  background:#fff;
-  border:1px solid #ccc;
-  box-shadow:0 2px 6px rgba(0,0,0,.3);
+#status {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  background: rgba(0,0,0,0.7);
+  color: white;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
 }
 
-/* Индикатор записи */
-#rec {
-  position:absolute;
-  bottom:120px;
-  left:50%;
-  transform:translateX(-50%);
-  z-index:1000;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  font-size:14px;
-}
 #dot {
-  width:12px;
-  height:12px;
-  background:red;
-  border-radius:50%;
-  opacity:0;
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  background: red;
+  border-radius: 50%;
+  margin-right: 6px;
+  opacity: 0;
 }
+
 .blink {
   animation: blink 1s infinite;
 }
+
 @keyframes blink {
-  0% { opacity:1 }
-  50% { opacity:0 }
-  100% { opacity:1 }
-}
-
-/* Инфо */
-#info {
-  position:absolute;
-  bottom:10px;
-  left:50%;
-  transform:translateX(-50%);
-  z-index:1000;
-  background:rgba(255,255,255,.95);
-  padding:10px 14px;
-  border-radius:10px;
-  font-size:14px;
-  box-shadow:0 2px 6px rgba(0,0,0,.3);
-  text-align:center;
-}
-
-/* Треугольник */
-.arrow {
-  width:0;
-  height:0;
-  border-left:10px solid transparent;
-  border-right:10px solid transparent;
-  border-bottom:20px solid blue;
+  0% { opacity: 1 }
+  50% { opacity: 0 }
+  100% { opacity: 1 }
 }
 </style>
 </head>
 
 <body>
 
-<div id="controls">
-  <button id="startBtn">▶ Старт GPS</button>
-  <button id="stopBtn">⏹ Стоп GPS</button>
-  <button id="saveBtn">💾 Сохранить</button>
-</div>
-
-<button id="centerBtn">🎯</button>
-
-<div id="rec">
-  <div id="dot"></div>
-  <div>Запись</div>
-</div>
-
-<div id="info">
-  ⏱ <span id="time">0:00</span><br>
-  📏 <span id="dist">0.00</span> км
-</div>
-
 <div id="map"></div>
 
+<div class="controls">
+  <button id="start">▶ START GPS</button>
+  <button id="stop">⏹ STOP GPS</button>
+  <button id="save">💾 SAVE CSV</button>
+  <button id="center">📍 CENTER</button>
+</div>
+
+<div id="status">
+  <span id="dot"></span>
+  ⏱ <span id="time">0:00</span><br>
+  📏 <span id="distance">0</span> m
+</div>
+
 <script>
-// ================== КАРТА ==================
 const map = L.map('map').setView([0,0], 2);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-// ================== ПЕРЕМЕННЫЕ ==================
-let userMarker = null;
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 20
+}).addTo(map);
+
 let watchId = null;
-let follow = true;
 let trackTimer = null;
-let lastPos = null;
-let lastTime = null;
+let timerInterval = null;
 
+let startTime = 0;
+let elapsedTime = 0;
+let totalDistance = 0;
+
+let lastPoint = null;
 let track = [];
-let distance = 0;
-let startTime = null;
 
-// ================== ИКОНКА ТРЕУГОЛЬНИКА ==================
-function arrowIcon(angle) {
-  return L.divIcon({
-    className:'',
-    html:`<div class="arrow" style="transform:rotate(${angle}deg)"></div>`,
-    iconSize:[20,20],
-    iconAnchor:[10,10]
-  });
+let follow = true;
+let firstFix = true;
+
+let userMarker = null;
+let trackLayer = L.layerGroup().addTo(map);
+
+const startBtn = document.getElementById("start");
+const stopBtn = document.getElementById("stop");
+const saveBtn = document.getElementById("save");
+const centerBtn = document.getElementById("center");
+const timeEl = document.getElementById("time");
+const distEl = document.getElementById("distance");
+const dot = document.getElementById("dot");
+
+map.on("dragstart zoomstart", () => follow = false);
+
+function haversine(a, b) {
+  const R = 6371000;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLon = (b.lon - a.lon) * Math.PI / 180;
+  const la1 = a.lat * Math.PI / 180;
+  const la2 = b.lat * Math.PI / 180;
+
+  return 2 * R * Math.asin(Math.sqrt(
+    Math.sin(dLat/2)**2 +
+    Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2
+  ));
 }
 
-// ================== ВСПОМОГАТЕЛЬНЫЕ ==================
-function haversine(a,b){
-  const R=6371000;
-  const dLat=(b[0]-a[0])*Math.PI/180;
-  const dLon=(b[1]-a[1])*Math.PI/180;
-  const lat1=a[0]*Math.PI/180;
-  const lat2=b[0]*Math.PI/180;
-  const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
-  return 2*R*Math.asin(Math.sqrt(h));
-}
-
-// ================== ОБНОВЛЕНИЕ GPS ==================
-function update(pos){
+function update(pos) {
   const lat = pos.coords.latitude;
   const lon = pos.coords.longitude;
   const speed = pos.coords.speed || 0;
+  const heading = pos.coords.heading || 0;
 
-  if(!userMarker){
-    userMarker = L.marker([lat,lon]).addTo(map);
+  if (!userMarker) {
+    userMarker = L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: '',
+        html: '▲',
+        iconSize: [20,20]
+      })
+    }).addTo(map);
+
+    map.setView([lat, lon], 18);
   } else {
-    userMarker.setLatLng([lat,lon]);
+    userMarker.setLatLng([lat, lon]);
+    userMarker.getElement().style.transform =
+      `rotate(${heading}deg)`;
   }
 
-  if(follow) map.setView([lat,lon], map.getZoom());
+  if (follow) map.panTo([lat, lon]);
 
-  if(lastPos){
-    const angle = Math.atan2(lon-lastPos[1], lat-lastPos[0])*180/Math.PI;
-    userMarker.setIcon(arrowIcon(angle));
-  }
-
-  window.currentFix = {lat,lon,speed,time:Date.now()};
+  userMarker._speed = speed;
+  userMarker._pos = { lat, lon };
 }
 
-// ================== ЗАПИСЬ ТРЕКА ==================
-function record(){
-  if(!window.currentFix) return;
-  const {lat,lon,speed,time} = window.currentFix;
+function record() {
+  if (!userMarker) return;
 
-  if(speed < 0.5) return;
+  const speed = userMarker._speed;
+  const point = userMarker._pos;
 
-  if(lastPos){
-    const d = haversine(lastPos,[lat,lon]);
-    if(d < 5) return;
-    distance += d;
+  if (speed < 0.5) return;
+
+  if (lastPoint) {
+    const d = haversine(lastPoint, point);
+    if (d < 5) return;
+    totalDistance += d;
   }
 
-  track.push({lat,lon,time,speed,dist:distance});
-  lastPos = [lat,lon];
+  lastPoint = point;
 
-  L.circleMarker([lat,lon],{radius:3,color:'red'}).addTo(map);
-  document.getElementById('dist').textContent = (distance/1000).toFixed(2);
+  track.push({
+    lat: point.lat,
+    lon: point.lon,
+    speed: speed,
+    distance: totalDistance
+  });
+
+  L.circleMarker([point.lat, point.lon], {
+    radius: 3,
+    color: "red"
+  }).addTo(trackLayer);
+
+  distEl.textContent = totalDistance.toFixed(1);
 }
-
-// ================== КНОПКИ ==================
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const saveBtn = document.getElementById('saveBtn');
-const centerBtn = document.getElementById('centerBtn');
-const dot = document.getElementById('dot');
 
 startBtn.onclick = () => {
-  startBtn.classList.add('active');
-  stopBtn.classList.remove('active');
-  dot.classList.add('blink');
+  startBtn.classList.add("active");
+  stopBtn.classList.remove("active");
+  dot.classList.add("blink");
+
   follow = true;
 
-  startTime = Date.now();
-  watchId = navigator.geolocation.watchPosition(update,null,{enableHighAccuracy:true});
-  trackTimer = setInterval(record,3000);
+  startTime = Date.now() - elapsedTime;
 
-  map.setZoom(18);
+  if (!timerInterval) {
+    timerInterval = setInterval(() => {
+      elapsedTime = Date.now() - startTime;
+      const sec = Math.floor(elapsedTime / 1000);
+      timeEl.textContent =
+        Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2,"0");
+    }, 1000);
+  }
+
+  if (!watchId) {
+    watchId = navigator.geolocation.watchPosition(update, null, {
+      enableHighAccuracy: true
+    });
+  }
+
+  if (!trackTimer) {
+    trackTimer = setInterval(record, 3000);
+  }
 };
 
 stopBtn.onclick = () => {
-  stopBtn.classList.add('active');
-  startBtn.classList.remove('active');
-  dot.classList.remove('blink');
+  stopBtn.classList.add("active");
+  startBtn.classList.remove("active");
+  dot.classList.remove("blink");
 
   follow = false;
-  navigator.geolocation.clearWatch(watchId);
+
+  if (watchId) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+
   clearInterval(trackTimer);
+  trackTimer = null;
+
+  clearInterval(timerInterval);
+  timerInterval = null;
 };
 
 centerBtn.onclick = () => {
-  if(userMarker){
+  if (userMarker) {
     follow = true;
-    map.setView(userMarker.getLatLng(),18);
+    map.setView(userMarker.getLatLng(), 18);
   }
 };
 
-map.on('dragstart zoomstart',()=>follow=false);
-
-// ================== ТАЙМЕР ==================
-setInterval(()=>{
-  if(startTime){
-    const sec = Math.floor((Date.now()-startTime)/1000);
-    document.getElementById('time').textContent =
-      Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
-  }
-},1000);
-
-// ================== Сохранение CSV ==================
 saveBtn.onclick = () => {
-  if(!track.length) return alert('Трек пуст');
-  let csv = 'lat,lon,time,speed,distance_m\n';
-  track.forEach(p=>{
-    csv+=`${p.lat},${p.lon},${p.time},${p.speed},${p.dist.toFixed(2)}\n`;
+  let csv = "lat,lon,speed,distance\n";
+  track.forEach(p => {
+    csv += `${p.lat},${p.lon},${p.speed},${p.distance}\n`;
   });
-  const blob = new Blob([csv],{type:'text/csv'});
-  const a = document.createElement('a');
+
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = 'track.csv';
+  a.download = "track.csv";
   a.click();
 };
 </script>
+
 </body>
 </html>
