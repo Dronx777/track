@@ -12,7 +12,6 @@
 html, body { margin:0; padding:0; height:100%; }
 #map { height:100vh; width:100vw; }
 
-/* Панель кнопок */
 #controls {
   position:absolute;
   top:10px;
@@ -26,7 +25,6 @@ html, body { margin:0; padding:0; height:100%; }
   gap:6px;
   box-shadow:0 2px 8px rgba(0,0,0,.25);
 }
-
 button {
   padding:8px 12px;
   border-radius:8px;
@@ -40,7 +38,6 @@ button.active {
   border-color:#0077ff;
 }
 
-/* Кнопка центрирования */
 #centerBtn {
   position:absolute;
   right:15px;
@@ -55,7 +52,6 @@ button.active {
   box-shadow:0 2px 6px rgba(0,0,0,.3);
 }
 
-/* Индикатор записи */
 #rec {
   position:absolute;
   bottom:120px;
@@ -74,16 +70,11 @@ button.active {
   border-radius:50%;
   opacity:0;
 }
-.blink {
-  animation: blink 1s infinite;
-}
+.blink { animation: blink 1s infinite; }
 @keyframes blink {
-  0% { opacity:1 }
-  50% { opacity:0 }
-  100% { opacity:1 }
+  0% {opacity:1} 50% {opacity:0} 100% {opacity:1}
 }
 
-/* Инфо */
 #info {
   position:absolute;
   bottom:10px;
@@ -98,7 +89,6 @@ button.active {
   text-align:center;
 }
 
-/* Треугольник */
 .arrow {
   width:0;
   height:0;
@@ -133,26 +123,25 @@ button.active {
 
 <script>
 // ================== КАРТА ==================
-const map = L.map('map').setView([0,0], 2);
+const map = L.map('map').setView([0,0],2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
 // ================== ПЕРЕМЕННЫЕ ==================
 let userMarker = null;
 let watchId = null;
-let follow = true;
-let trackTimer = null;
+let follow = false;
 
-let lastPos = null;
+let lastFixPos = null;     // для стрелки
+let lastTrackPos = null;  // для трека
+
 let track = [];
 let distance = 0;
-
-// ⏱ таймер
 let startTime = null;
-let elapsed = 0;
 let timerInterval = null;
+let recordInterval = null;
 
 // ================== ИКОНКА ==================
-function arrowIcon(angle) {
+function arrowIcon(angle){
   return L.divIcon({
     className:'',
     html:`<div class="arrow" style="transform:rotate(${angle}deg)"></div>`,
@@ -161,58 +150,83 @@ function arrowIcon(angle) {
   });
 }
 
-// ================== ВСПОМОГАТЕЛЬНЫЕ ==================
+// ================== МАТЕМАТИКА ==================
 function haversine(a,b){
   const R=6371000;
   const dLat=(b[0]-a[0])*Math.PI/180;
   const dLon=(b[1]-a[1])*Math.PI/180;
   const lat1=a[0]*Math.PI/180;
   const lat2=b[0]*Math.PI/180;
-  const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  const h=Math.sin(dLat/2)**2 +
+          Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
   return 2*R*Math.asin(Math.sqrt(h));
 }
 
-// ================== GPS ==================
-function update(pos){
+// ================== GPS ОБНОВЛЕНИЕ ==================
+function onGps(pos){
   const lat = pos.coords.latitude;
   const lon = pos.coords.longitude;
   const speed = pos.coords.speed || 0;
 
   if(!userMarker){
     userMarker = L.marker([lat,lon]).addTo(map);
-    map.setView([lat,lon],18); // центр только при первом фиксе
+    map.setView([lat,lon],18);
   } else {
     userMarker.setLatLng([lat,lon]);
   }
 
-  if(lastPos){
-    const angle = Math.atan2(lon-lastPos[1], lat-lastPos[0])*180/Math.PI;
+  if(lastFixPos){
+    const angle = Math.atan2(
+      lon-lastFixPos[1],
+      lat-lastFixPos[0]
+    ) * 180 / Math.PI;
     userMarker.setIcon(arrowIcon(angle));
   }
+
+  lastFixPos = [lat,lon];
 
   if(follow) map.panTo([lat,lon]);
 
   window.currentFix = {lat,lon,speed,time:Date.now()};
 }
 
-// ================== ЗАПИСЬ ==================
-function record(){
+// ================== ЗАПИСЬ ТРЕКА ==================
+function recordTrack(){
   if(!window.currentFix) return;
+
   const {lat,lon,speed,time} = window.currentFix;
 
   if(speed < 0.5) return;
 
-  if(lastPos){
-    const d = haversine(lastPos,[lat,lon]);
+  if(lastTrackPos){
+    const d = haversine(lastTrackPos,[lat,lon]);
     if(d < 5) return;
     distance += d;
   }
 
-  lastPos = [lat,lon];
+  lastTrackPos = [lat,lon];
+
   track.push({lat,lon,time,speed,dist:distance});
 
   L.circleMarker([lat,lon],{radius:3,color:'red'}).addTo(map);
-  document.getElementById('dist').textContent = (distance/1000).toFixed(2);
+
+  document.getElementById('dist').textContent =
+    (distance/1000).toFixed(2);
+}
+
+// ================== ТАЙМЕР ==================
+function startTimer(){
+  startTime = Date.now();
+  timerInterval = setInterval(()=>{
+    const sec = Math.floor((Date.now()-startTime)/1000);
+    document.getElementById('time').textContent =
+      Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
+  },1000);
+}
+
+function stopTimer(){
+  clearInterval(timerInterval);
+  timerInterval = null;
 }
 
 // ================== КНОПКИ ==================
@@ -222,51 +236,32 @@ const saveBtn = document.getElementById('saveBtn');
 const centerBtn = document.getElementById('centerBtn');
 const dot = document.getElementById('dot');
 
-startBtn.onclick = () => {
+startBtn.onclick = ()=>{
   startBtn.classList.add('active');
   stopBtn.classList.remove('active');
   dot.classList.add('blink');
   follow = true;
 
-  startTime = Date.now() - elapsed;
+  watchId = navigator.geolocation.watchPosition(
+    onGps,null,{enableHighAccuracy:true}
+  );
 
-  if(!timerInterval){
-    timerInterval = setInterval(()=>{
-      elapsed = Date.now() - startTime;
-      const sec = Math.floor(elapsed/1000);
-      document.getElementById('time').textContent =
-        Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
-    },1000);
-  }
-
-  if(!watchId){
-    watchId = navigator.geolocation.watchPosition(update,null,{enableHighAccuracy:true});
-  }
-
-  if(!trackTimer){
-    trackTimer = setInterval(record,3000);
-  }
+  recordInterval = setInterval(recordTrack,3000);
+  startTimer();
 };
 
-stopBtn.onclick = () => {
+stopBtn.onclick = ()=>{
   stopBtn.classList.add('active');
   startBtn.classList.remove('active');
   dot.classList.remove('blink');
   follow = false;
 
-  if(watchId){
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-  }
-
-  clearInterval(trackTimer);
-  trackTimer = null;
-
-  clearInterval(timerInterval);
-  timerInterval = null;
+  navigator.geolocation.clearWatch(watchId);
+  clearInterval(recordInterval);
+  stopTimer();
 };
 
-centerBtn.onclick = () => {
+centerBtn.onclick = ()=>{
   if(userMarker){
     follow = true;
     map.setView(userMarker.getLatLng(),18);
@@ -276,12 +271,14 @@ centerBtn.onclick = () => {
 map.on('dragstart zoomstart',()=>follow=false);
 
 // ================== CSV ==================
-saveBtn.onclick = () => {
+saveBtn.onclick = ()=>{
   if(!track.length) return alert('Трек пуст');
-  let csv = 'lat,lon,time,speed,distance_m\n';
+
+  let csv = 'lat,lon,time,speed_mps,distance_m\n';
   track.forEach(p=>{
-    csv+=`${p.lat},${p.lon},${p.time},${p.speed},${p.dist.toFixed(2)}\n`;
+    csv += `${p.lat},${p.lon},${p.time},${p.speed},${p.dist.toFixed(2)}\n`;
   });
+
   const blob = new Blob([csv],{type:'text/csv'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
