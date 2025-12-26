@@ -84,6 +84,7 @@ button.active {
 /* ================== КАРТА ================== */
 const map = L.map('map').setView([0, 0], 2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  const NAV_ZOOM = map.getMaxZoom() - 1;
 
 /* ================== СОСТОЯНИЕ ================== */
 let followUser = true;
@@ -125,8 +126,18 @@ function startGPS() {
     return;
   }
 
+  // визуальное состояние кнопок
   startBtn.classList.add("active");
   stopBtn.classList.remove("active");
+
+  // включаем автослежение
+  followUser = true;
+  centerBtn.classList.add("active");
+
+  // если координаты уже есть — сразу центрируемся
+  if (lastCoords) {
+    map.setView(lastCoords, NAV_ZOOM);
+  }
 
   watchId = navigator.geolocation.watchPosition(
     updatePosition,
@@ -135,18 +146,6 @@ function startGPS() {
   );
 
   trackTimer = setInterval(recordTrackPoint, 3000);
-}
-
-function stopGPS() {
-  if (watchId) {
-    navigator.geolocation.clearWatch(watchId);
-    watchId = null;
-  }
-  clearInterval(trackTimer);
-  trackTimer = null;
-
-  startBtn.classList.remove("active");
-  stopBtn.classList.add("active");
 }
 
 /* ================== ОБНОВЛЕНИЕ ПОЗИЦИИ ================== */
