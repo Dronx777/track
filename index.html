@@ -35,6 +35,15 @@ html, body {
   border: 1px solid #ccc;
   background: #fff;
   font-size: 14px;
+  cursor: pointer;
+}
+
+/* Активная кнопка */
+button.active {
+  background: #0077ff;
+  color: #fff;
+  border-color: #005fd1;
+  box-shadow: 0 2px 6px rgba(0, 119, 255, 0.4);
 }
 
 /* Кнопка центрирования */
@@ -50,6 +59,11 @@ html, body {
   height: 46px;
   font-size: 22px;
   border: 1px solid #ccc;
+  cursor: pointer;
+}
+.center-btn.active {
+  background: #0077ff;
+  color: #fff;
 }
 </style>
 </head>
@@ -57,12 +71,12 @@ html, body {
 <body>
 
 <div class="controls">
-  <button onclick="startGPS()">▶ Старт GPS</button>
-  <button onclick="stopGPS()">⏹ Стоп GPS</button>
+  <button id="startBtn" onclick="startGPS()">▶ Старт GPS</button>
+  <button id="stopBtn" onclick="stopGPS()">⏹ Стоп GPS</button>
   <button onclick="saveTrackCSV()">💾 Сохранить</button>
 </div>
 
-<button class="center-btn" onclick="enableFollow()">📍</button>
+<button id="centerBtn" class="center-btn" onclick="enableFollow()">📍</button>
 
 <div id="map"></div>
 
@@ -79,21 +93,29 @@ let trackTimer = null;
 let userMarker = null;
 let lastCoords = null;
 let lastTrackPoint = null;
+let lastSpeed = 0;
 
 let trackPoints = [];
 let totalDistance = 0;
 
 const trackLayer = L.layerGroup().addTo(map);
 
+/* ================== КНОПКИ ================== */
+const startBtn = document.getElementById("startBtn");
+const stopBtn = document.getElementById("stopBtn");
+const centerBtn = document.getElementById("centerBtn");
+
 /* ================== ОТКЛЮЧЕНИЕ АВТОСЛЕЖЕНИЯ ================== */
-map.on('dragstart zoomstart', () => followUser = false);
+map.on('dragstart zoomstart', () => {
+  followUser = false;
+  centerBtn.classList.remove("active");
+});
 
 /* ================== ЦЕНТРИРОВАНИЕ ================== */
 function enableFollow() {
   followUser = true;
-  if (lastCoords) {
-    map.setView(lastCoords, 17);
-  }
+  centerBtn.classList.add("active");
+  if (lastCoords) map.setView(lastCoords, 17);
 }
 
 /* ================== GPS ================== */
@@ -102,6 +124,9 @@ function startGPS() {
     alert("GPS не поддерживается");
     return;
   }
+
+  startBtn.classList.add("active");
+  stopBtn.classList.remove("active");
 
   watchId = navigator.geolocation.watchPosition(
     updatePosition,
@@ -119,12 +144,16 @@ function stopGPS() {
   }
   clearInterval(trackTimer);
   trackTimer = null;
+
+  startBtn.classList.remove("active");
+  stopBtn.classList.add("active");
 }
 
 /* ================== ОБНОВЛЕНИЕ ПОЗИЦИИ ================== */
 function updatePosition(pos) {
   const { latitude, longitude, speed, heading } = pos.coords;
   lastCoords = [latitude, longitude];
+  lastSpeed = speed || 0;
 
   if (!userMarker) {
     userMarker = L.marker(lastCoords, {
@@ -138,11 +167,9 @@ function updatePosition(pos) {
   if (followUser) {
     map.setView(lastCoords, map.getZoom() || 17);
   }
-
-  lastSpeed = speed || 0;
 }
 
-/* ================== ИКОНКА-ТРЕУГОЛЬНИК ================== */
+/* ================== ТРЕУГОЛЬНИК ================== */
 function triangleIcon(angle) {
   return L.divIcon({
     className: "",
@@ -156,7 +183,7 @@ function triangleIcon(angle) {
   });
 }
 
-/* ================== РАССТОЯНИЕ ================== */
+/* ================== ДИСТАНЦИЯ ================== */
 function distanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = x => x * Math.PI / 180;
