@@ -2,234 +2,235 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<title>GPS трекер</title>
-<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
+<title>GPS Tracker</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 
 <style>
-html,body { margin:0; padding:0; height:100%; }
-#map { height:100vh; width:100vw; }
-
-/* верхние кнопки */
-#topPanel {
-  position:absolute;
-  top:10px;
-  left:50%;
-  transform:translateX(-50%);
-  z-index:1000;
-  display:flex;
-  gap:8px;
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
 }
-#topPanel button {
-  padding:10px 14px;
-  font-size:14px;
-  background:#fff;
-  border-radius:10px;
-  border:1px solid #ccc;
-  box-shadow:0 2px 6px rgba(0,0,0,0.25);
+#map {
+  width: 100%;
+  height: 100%;
 }
 
-/* кнопка центрирования */
-#centerBtn {
-  position:absolute;
-  right:14px;
-  top:55%;
-  z-index:1000;
-  width:48px;
-  height:48px;
-  border-radius:50%;
-  background:#fff;
-  border:1px solid #ccc;
-  box-shadow:0 2px 6px rgba(0,0,0,0.3);
-  display:none;
-  align-items:center;
-  justify-content:center;
-  cursor:pointer;
+/* Панель кнопок */
+.controls {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
 }
-#centerBtn::before {
-  content:"";
-  width:22px;
-  height:22px;
-  border:2px solid #000;
-  border-radius:50%;
+.controls button {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  background: #fff;
+  font-size: 14px;
 }
-#centerBtn::after {
-  content:"";
-  width:4px;
-  height:4px;
-  background:#000;
-  border-radius:50%;
-  position:absolute;
+
+/* Кнопка центрирования */
+.center-btn {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1000;
+  background: #fff;
+  border-radius: 50%;
+  width: 46px;
+  height: 46px;
+  font-size: 22px;
+  border: 1px solid #ccc;
 }
 </style>
 </head>
 
 <body>
 
-<div id="topPanel">
-  <button id="startBtn">Старт GPS</button>
-  <button id="stopBtn">Стоп GPS</button>
-  <button id="saveBtn">💾 Сохранить CSV</button>
+<div class="controls">
+  <button onclick="startGPS()">▶ Старт GPS</button>
+  <button onclick="stopGPS()">⏹ Стоп GPS</button>
+  <button onclick="saveTrackCSV()">💾 Сохранить</button>
 </div>
 
-<div id="centerBtn"></div>
+<button class="center-btn" onclick="enableFollow()">📍</button>
+
 <div id="map"></div>
 
 <script>
-/* ===== Карта ===== */
-const map = L.map('map').setView([51.16, 71.47], 12);
+/* ================== КАРТА ================== */
+const map = L.map('map').setView([0, 0], 2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-/* ===== Переменные ===== */
+/* ================== СОСТОЯНИЕ ================== */
+let followUser = true;
 let watchId = null;
-let followUser = false;
-let userLatLng = null;
-let lastLatLng = null;
-
-let trackRecording = false;
 let trackTimer = null;
-let trackPoints = [];
-let trackLayer = L.layerGroup().addTo(map);
-
-/* ===== SVG треугольник ===== */
-function createArrowIcon(angle = 0) {
-  return L.divIcon({
-    className: '',
-    iconSize: [30, 30],
-    iconAnchor: [15, 15],
-    html: `
-      <svg width="30" height="30" viewBox="0 0 100 100"
-        style="transform: rotate(${angle}deg);">
-        <polygon points="50,5 95,95 50,75 5,95"
-          fill="white" stroke="black" stroke-width="6"/>
-      </svg>
-    `
-  });
-}
 
 let userMarker = null;
+let lastCoords = null;
+let lastTrackPoint = null;
 
-/* ===== Обновление позиции ===== */
-function updateUserPosition(pos) {
-  const lat = pos.coords.latitude;
-  const lon = pos.coords.longitude;
-  userLatLng = [lat, lon];
+let trackPoints = [];
+let totalDistance = 0;
 
-  let angle = 0;
-  if (lastLatLng) {
-    const dx = lon - lastLatLng[1];
-    const dy = lat - lastLatLng[0];
-    angle = Math.atan2(dx, dy) * 180 / Math.PI;
+const trackLayer = L.layerGroup().addTo(map);
+
+/* ================== ОТКЛЮЧЕНИЕ АВТОСЛЕЖЕНИЯ ================== */
+map.on('dragstart zoomstart', () => followUser = false);
+
+/* ================== ЦЕНТРИРОВАНИЕ ================== */
+function enableFollow() {
+  followUser = true;
+  if (lastCoords) {
+    map.setView(lastCoords, 17);
   }
-  lastLatLng = userLatLng;
+}
+
+/* ================== GPS ================== */
+function startGPS() {
+  if (!navigator.geolocation) {
+    alert("GPS не поддерживается");
+    return;
+  }
+
+  watchId = navigator.geolocation.watchPosition(
+    updatePosition,
+    err => alert(err.message),
+    { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 }
+  );
+
+  trackTimer = setInterval(recordTrackPoint, 3000);
+}
+
+function stopGPS() {
+  if (watchId) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  clearInterval(trackTimer);
+  trackTimer = null;
+}
+
+/* ================== ОБНОВЛЕНИЕ ПОЗИЦИИ ================== */
+function updatePosition(pos) {
+  const { latitude, longitude, speed, heading } = pos.coords;
+  lastCoords = [latitude, longitude];
 
   if (!userMarker) {
-    userMarker = L.marker(userLatLng, { icon: createArrowIcon(angle) }).addTo(map);
-    document.getElementById('centerBtn').style.display = 'flex';
+    userMarker = L.marker(lastCoords, {
+      icon: triangleIcon(heading || 0)
+    }).addTo(map);
   } else {
-    userMarker.setLatLng(userLatLng);
-    userMarker.setIcon(createArrowIcon(angle));
+    userMarker.setLatLng(lastCoords);
+    userMarker.setIcon(triangleIcon(heading || 0));
   }
 
   if (followUser) {
-    map.setView(userLatLng, map.getZoom());
+    map.setView(lastCoords, map.getZoom() || 17);
   }
+
+  lastSpeed = speed || 0;
 }
 
-/* ===== Запись трека ===== */
+/* ================== ИКОНКА-ТРЕУГОЛЬНИК ================== */
+function triangleIcon(angle) {
+  return L.divIcon({
+    className: "",
+    html: `<div style="
+      width:0;height:0;
+      border-left:10px solid transparent;
+      border-right:10px solid transparent;
+      border-bottom:20px solid blue;
+      transform: rotate(${angle}deg);
+    "></div>`
+  });
+}
+
+/* ================== РАССТОЯНИЕ ================== */
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat/2)**2 +
+    Math.cos(toRad(lat1)) *
+    Math.cos(toRad(lat2)) *
+    Math.sin(dLon/2)**2;
+
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/* ================== ЗАПИСЬ ТРЕКА ================== */
 function recordTrackPoint() {
-  if (!trackRecording || !userLatLng) return;
+  if (!lastCoords || lastSpeed < 0.5) return;
+
+  const [lat, lon] = lastCoords;
+  let dist = 0;
+
+  if (lastTrackPoint) {
+    dist = distanceMeters(
+      lastTrackPoint.lat,
+      lastTrackPoint.lon,
+      lat,
+      lon
+    );
+    if (dist < 5) return;
+  }
+
+  totalDistance += dist;
 
   const point = {
-    lat: userLatLng[0],
-    lon: userLatLng[1],
-    time: new Date().toISOString()
+    lat, lon,
+    time: new Date().toISOString(),
+    speed: lastSpeed.toFixed(2),
+    distance_from_prev_m: dist.toFixed(2),
+    total_distance_m: totalDistance.toFixed(2)
   };
-  trackPoints.push(point);
 
-  L.circleMarker([point.lat, point.lon], {
+  trackPoints.push(point);
+  lastTrackPoint = point;
+
+  L.circleMarker([lat, lon], {
     radius: 4,
-    color: '#c00000',
-    fillColor: '#ff0000',
+    color: "red",
     fillOpacity: 0.9
   }).addTo(trackLayer);
 }
 
-/* ===== Старт GPS ===== */
-document.getElementById('startBtn').onclick = () => {
-  if (!navigator.geolocation || watchId) return;
-
-  trackRecording = true;
-  followUser = true;
-  trackPoints = [];
-  trackLayer.clearLayers();
-  lastLatLng = null;
-
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      updateUserPosition(pos);
-      map.setView(userLatLng, 16);
-
-      watchId = navigator.geolocation.watchPosition(
-        updateUserPosition,
-        err => console.warn(err),
-        { enableHighAccuracy: true, maximumAge: 1000 }
-      );
-
-      trackTimer = setInterval(recordTrackPoint, 3000);
-    },
-    () => alert('GPS недоступен')
-  );
-};
-
-/* ===== Стоп GPS ===== */
-document.getElementById('stopBtn').onclick = () => {
-  trackRecording = false;
-  followUser = false;
-
-  if (watchId) navigator.geolocation.clearWatch(watchId);
-  watchId = null;
-
-  if (trackTimer) clearInterval(trackTimer);
-  trackTimer = null;
-};
-
-/* ===== Центрирование ===== */
-document.getElementById('centerBtn').onclick = () => {
-  if (!userLatLng) return;
-  followUser = true;
-  map.setView(userLatLng, 16);
-};
-
-/* ===== Сохранение CSV ===== */
-document.getElementById('saveBtn').onclick = () => {
+/* ================== CSV ================== */
+function saveTrackCSV() {
   if (!trackPoints.length) {
-    alert('Трек пуст');
+    alert("Трек пуст");
     return;
   }
 
-  let csv = 'lat,lon,timestamp\n';
+  let csv = "lat,lon,time,speed_m_s,distance_from_prev_m,total_distance_m\n";
   trackPoints.forEach(p => {
-    csv += `${p.lat},${p.lon},${p.time}\n`;
+    csv += `${p.lat},${p.lon},${p.time},${p.speed},${p.distance_from_prev_m},${p.total_distance_m}\n`;
   });
 
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
 
-  const a = document.createElement('a');
-  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const a = document.createElement("a");
   a.href = url;
-  a.download = `track_${ts}.csv`;
+  a.download = "track.csv";
   a.click();
 
   URL.revokeObjectURL(url);
-};
-
-/* ===== Отключение автоследования ===== */
-map.on('dragstart', () => followUser = false);
-map.on('zoomstart', () => followUser = false);
+}
 </script>
 
 </body>
