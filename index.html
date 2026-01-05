@@ -7,11 +7,13 @@
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
 
 <style>
 html, body { margin:0; padding:0; height:100%; }
 #map { height:100vh; width:100vw; }
 
+/* === СТИЛИ НЕ ТРОГАЕМ === */
 #controls {
   position:absolute;
   top:10px;
@@ -37,7 +39,6 @@ button.active {
   color:#fff;
   border-color:#0077ff;
 }
-
 #centerBtn {
   position:absolute;
   right:15px;
@@ -51,7 +52,6 @@ button.active {
   border:1px solid #ccc;
   box-shadow:0 2px 6px rgba(0,0,0,.3);
 }
-
 #rec {
   position:absolute;
   bottom:120px;
@@ -74,7 +74,6 @@ button.active {
 @keyframes blink {
   0% {opacity:1} 50% {opacity:0} 100% {opacity:1}
 }
-
 #info {
   position:absolute;
   bottom:10px;
@@ -88,7 +87,6 @@ button.active {
   box-shadow:0 2px 6px rgba(0,0,0,.3);
   text-align:center;
 }
-
 .arrow {
   width:0;
   height:0;
@@ -126,13 +124,33 @@ button.active {
 const map = L.map('map').setView([0,0],2);
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
+// ================== SHP СЛОЙ ==================
+const shpLayer = L.geoJSON(null, {
+  style: {
+    color: 'blue',
+    weight: 2,
+    fillColor: 'blue',
+    fillOpacity: 0.2
+  }
+}).addTo(map);
+
+// загрузка SHP
+shp("shp/buf_10m_poly.shp")
+  .then(geojson => {
+    shpLayer.addData(geojson);
+    map.fitBounds(shpLayer.getBounds());
+  })
+  .catch(err => {
+    console.error("Ошибка загрузки SHP:", err);
+  });
+
 // ================== ПЕРЕМЕННЫЕ ==================
 let userMarker = null;
 let watchId = null;
 let follow = false;
 
-let lastFixPos = null;     // для стрелки
-let lastTrackPos = null;  // для трека
+let lastFixPos = null;
+let lastTrackPos = null;
 
 let track = [];
 let distance = 0;
@@ -162,7 +180,7 @@ function haversine(a,b){
   return 2*R*Math.asin(Math.sqrt(h));
 }
 
-// ================== GPS ОБНОВЛЕНИЕ ==================
+// ================== GPS ==================
 function onGps(pos){
   const lat = pos.coords.latitude;
   const lon = pos.coords.longitude;
@@ -184,18 +202,15 @@ function onGps(pos){
   }
 
   lastFixPos = [lat,lon];
-
   if(follow) map.panTo([lat,lon]);
 
   window.currentFix = {lat,lon,speed,time:Date.now()};
 }
 
-// ================== ЗАПИСЬ ТРЕКА ==================
+// ================== ТРЕК ==================
 function recordTrack(){
   if(!window.currentFix) return;
-
   const {lat,lon,speed,time} = window.currentFix;
-
   if(speed < 0.5) return;
 
   if(lastTrackPos){
@@ -205,11 +220,9 @@ function recordTrack(){
   }
 
   lastTrackPos = [lat,lon];
-
   track.push({lat,lon,time,speed,dist:distance});
 
   L.circleMarker([lat,lon],{radius:3,color:'red'}).addTo(map);
-
   document.getElementById('dist').textContent =
     (distance/1000).toFixed(2);
 }
@@ -223,29 +236,18 @@ function startTimer(){
       Math.floor(sec/60)+':'+String(sec%60).padStart(2,'0');
   },1000);
 }
-
 function stopTimer(){
   clearInterval(timerInterval);
-  timerInterval = null;
 }
 
 // ================== КНОПКИ ==================
-const startBtn = document.getElementById('startBtn');
-const stopBtn = document.getElementById('stopBtn');
-const saveBtn = document.getElementById('saveBtn');
-const centerBtn = document.getElementById('centerBtn');
-const dot = document.getElementById('dot');
-
 startBtn.onclick = ()=>{
   startBtn.classList.add('active');
   stopBtn.classList.remove('active');
   dot.classList.add('blink');
   follow = true;
 
-  watchId = navigator.geolocation.watchPosition(
-    onGps,null,{enableHighAccuracy:true}
-  );
-
+  watchId = navigator.geolocation.watchPosition(onGps,null,{enableHighAccuracy:true});
   recordInterval = setInterval(recordTrack,3000);
   startTimer();
 };
